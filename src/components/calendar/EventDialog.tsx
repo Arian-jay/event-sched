@@ -11,8 +11,9 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EventForm, type EventFormValues } from "./EventForm";
-import { toDateKey } from "@/lib/utils";
+import { toDateKey, isEventExpired, eventsOverlap, cn } from "@/lib/utils";
 import type { EventItem, Profile } from "@/types/supabase";
 
 export function EventDialog({
@@ -35,6 +36,7 @@ export function EventDialog({
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [editingDefaults, setEditingDefaults] = useState<EventFormValues | null>(null);
   const [loadingEdit, setLoadingEdit] = useState(false);
+  const [conflictNotice, setConflictNotice] = useState<string | null>(null);
 
   const dateLabel = date.toLocaleDateString("default", {
     weekday: "long",
@@ -42,11 +44,18 @@ export function EventDialog({
     day: "numeric",
   });
 
+  function conflictsWithOthers(values: { startTime: string; endTime: string }, excludeId?: string): boolean {
+    const candidate = { start_time: values.startTime || null, end_time: values.endTime || null };
+    return events
+      .filter((ev) => ev.id !== excludeId)
+      .some((ev) => eventsOverlap(candidate, { start_time: ev.start_time, end_time: ev.end_time }));
+  }
+
   async function startEditing(ev: EventItem) {
     setLoadingEdit(true);
     setShowCreateForm(false);
+    setConflictNotice(null);
 
-    // Look up who this event is currently shared with, if anyone.
     const { data: participants } = await supabase
       .from("event_participants")
       .select("user_id")
@@ -65,6 +74,8 @@ export function EventDialog({
   }
 
   async function handleCreate(values: EventFormValues) {
+    const hasConflict = conflictsWithOthers(values);
+
     const { data: newEvent, error: insertError } = await supabase
       .from("events")
       .insert({
@@ -90,11 +101,16 @@ export function EventDialog({
       });
     }
 
+    setConflictNotice(
+      hasConflict ? "Saved — but this overlaps with another event already on this day." : null
+    );
     setShowCreateForm(false);
     onChanged();
   }
 
   async function handleUpdate(eventId: string, values: EventFormValues) {
+    const hasConflict = conflictsWithOthers(values, eventId);
+
     const { error: updateError } = await supabase
       .from("events")
       .update({
@@ -108,7 +124,6 @@ export function EventDialog({
 
     if (updateError) return updateError.message;
 
-    // Replace sharing target: clear existing participants, add the new one (if any).
     await supabase.from("event_participants").delete().eq("event_id", eventId);
     if (values.shareWith !== "none") {
       const { error: shareError } = await supabase
@@ -117,6 +132,9 @@ export function EventDialog({
       if (shareError) return shareError.message;
     }
 
+    setConflictNotice(
+      hasConflict ? "Saved — but this overlaps with another event already on this day." : null
+    );
     setEditingEventId(null);
     setEditingDefaults(null);
     onChanged();
@@ -139,10 +157,25 @@ export function EventDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {conflictNotice && (
+          <Alert variant="destructive">
+            <AlertDescription>{conflictNotice}</AlertDescription>
+          </Alert>
+        )}
+
         {events.length > 0 && (
           <div className="flex flex-col gap-3">
             {events.map((ev) => {
               const isEditingThis = editingEventId === ev.id;
+              const expired = isEventExpired(ev);
+              const conflicting = events.some(
+                (other) =>
+                  other.id !== ev.id &&
+                  eventsOverlap(
+                    { start_time: ev.start_time, end_time: ev.end_time },
+                    { start_time: other.start_time, end_time: other.end_time }
+                  )
+              );
 
               if (isEditingThis && editingDefaults) {
                 return (
@@ -163,18 +196,26 @@ export function EventDialog({
               }
 
               return (
-                <div key={ev.id} className="flex items-start justify-between rounded-lg border border-border p-3">
+                <div
+                  key={ev.id}
+                  className="flex items-start justify-between rounded-lg border border-border p-3"
+                >
                   <div className="flex gap-3">
-                    <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: ev.color }} />
+                    <span
+                      className="mt-1 h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: expired ? "#DC2626" : ev.color }}
+                    />
                     <div>
-                      <p className="font-medium">{ev.title}</p>
+                      <p className={cn("font-medium", expired && "text-muted-foreground line-through")}>
+                        {ev.title}
+                      </p>
                       {(ev.start_time || ev.end_time) && (
                         <p className="text-xs text-muted-foreground">
                           {ev.start_time?.slice(0, 5)} {ev.end_time && `– ${ev.end_time.slice(0, 5)}`}
                         </p>
                       )}
                       {ev.description && <p className="mt-1 text-sm text-muted-foreground">{ev.description}</p>}
-                      <div className="mt-2 flex items-center gap-2">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
                         {ev.owner_id === profile.id ? (
                           <Badge variant="accent">Your event</Badge>
                         ) : (
@@ -182,6 +223,8 @@ export function EventDialog({
                             Shared by {ev.owner?.username}
                           </Badge>
                         )}
+                        {expired && <Badge variant="destructive">Expired</Badge>}
+                        {!expired && conflicting && <Badge variant="destructive">Conflict</Badge>}
                       </div>
                     </div>
                   </div>

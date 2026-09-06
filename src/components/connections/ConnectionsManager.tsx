@@ -39,6 +39,12 @@ export function ConnectionsManager({ profile }: { profile: Profile }) {
     load();
   }
 
+  async function unconnect(connectionId: string, username: string) {
+    if (!confirm(`Remove @${username} from your connections?`)) return;
+    await supabase.from("connections").delete().eq("id", connectionId);
+    load();
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <div className="rounded-xl border border-border bg-card p-6">
@@ -64,14 +70,19 @@ export function ConnectionsManager({ profile }: { profile: Profile }) {
               {accepted.map((c) => {
                 const partner = c.requester_id === profile.id ? c.addressee! : c.requester!;
                 return (
-                  <div key={c.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                    <Avatar>
-                      <AvatarFallback>{partner.username[0]?.toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="text-sm font-medium">@{partner.username}</p>
-                      {partner.full_name && <p className="text-xs text-muted-foreground">{partner.full_name}</p>}
+                  <div key={c.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+                    <div className="flex items-center gap-3">
+                      <Avatar>
+                        <AvatarFallback>{partner.username[0]?.toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-sm font-medium">@{partner.username}</p>
+                        {partner.full_name && <p className="text-xs text-muted-foreground">{partner.full_name}</p>}
+                      </div>
                     </div>
+                    <Button variant="outline" size="sm" onClick={() => unconnect(c.id, partner.username)}>
+                      Unconnect
+                    </Button>
                   </div>
                 );
               })}

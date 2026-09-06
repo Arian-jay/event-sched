@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { cn, toDateKey } from "@/lib/utils";
+import { cn, toDateKey, isEventExpired } from "@/lib/utils";
 import { EventDialog } from "./EventDialog";
 import type { EventItem, Profile, Connection } from "@/types/supabase";
 
@@ -96,7 +96,7 @@ export function EventCalendar({ profile }: { profile: Profile }) {
               key={key}
               onClick={() => setSelectedDate(date)}
               className={cn(
-                "flex h-14 flex-col items-start gap-1 rounded-md border border-transparent p-1.5 text-left transition-colors hover:border-border hover:bg-secondary sm:h-16",
+                "flex h-20 flex-col items-start gap-1 rounded-md border border-transparent p-2 text-left transition-colors hover:border-border hover:bg-secondary sm:h-24",
                 !inMonth && "opacity-35",
                 isToday && "border-accent bg-accent/10"
               )}
@@ -107,7 +107,13 @@ export function EventCalendar({ profile }: { profile: Profile }) {
                   <span
                     key={ev.id}
                     className="h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: ev.owner_id === profile.id ? "#D9A441" : "#B3416B" }}
+                    style={{
+                      backgroundColor: isEventExpired(ev)
+                        ? "#DC2626"
+                        : ev.owner_id === profile.id
+                        ? "#D9A441"
+                        : "#B3416B",
+                    }}
                     title={ev.title}
                   />
                 ))}
@@ -120,12 +126,15 @@ export function EventCalendar({ profile }: { profile: Profile }) {
         })}
       </div>
 
-      <div className="mt-4 flex gap-4 text-xs text-muted-foreground">
+      <div className="mt-4 flex flex-wrap gap-4 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-[#D9A441]" /> Your events
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-[#B3416B]" /> Shared with you
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-[#DC2626]" /> Expired
         </span>
       </div>
 
