@@ -53,6 +53,7 @@ export async function GET(request: Request) {
     }
 
     let remindersSent = 0;
+    const sendErrors: string[] = [];
 
     for (const ev of candidates ?? []) {
       const eventMoment = new Date(`${ev.event_date}T${ev.start_time}`);
@@ -66,34 +67,47 @@ export async function GET(request: Request) {
       const recipientIds = Array.from(new Set([ev.owner_id, ...(participants ?? []).map((p) => p.user_id)]));
 
       for (const userId of recipientIds) {
-        const { data: alreadySent } = await supabase
-          .from("sent_event_reminders")
-          .select("event_id")
-          .eq("event_id", ev.id)
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (alreadySent) continue;
+        try {
+          const { data: alreadySent } = await supabase
+            .from("sent_event_reminders")
+            .select("event_id")
+            .eq("event_id", ev.id)
+            .eq("user_id", userId)
+            .maybeSingle();
+          if (alreadySent) continue;
 
-        const { data: userResult } = await supabase.auth.admin.getUserById(userId);
-        const email = userResult?.user?.email;
-        if (!email) continue;
+          const { data: userResult } = await supabase.auth.admin.getUserById(userId);
+          const email = userResult?.user?.email;
+          if (!email) continue;
 
-        await resend.emails.send({
-          from: process.env.EMAIL_FROM ?? "Together <onboarding@resend.dev>",
-          to: email,
-          subject: `Reminder: "${ev.title}" is coming up`,
-          html: `<p>Just a heads-up — <strong>${ev.title}</strong> is scheduled for ${ev.event_date} at ${ev.start_time?.slice(
-            0,
-            5
-          )}, about 24 hours from now.</p>`,
-        });
+          const { error: sendError } = await resend.emails.send({
+            from: process.env.EMAIL_FROM ?? "Together <onboarding@resend.dev>",
+            to: email,
+            subject: `Reminder: "${ev.title}" is coming up`,
+            html: `<p>Just a heads-up — <strong>${ev.title}</strong> is scheduled for ${ev.event_date} at ${ev.start_time?.slice(
+              0,
+              5
+            )}, about 24 hours from now.</p>`,
+          });
 
-        await supabase.from("sent_event_reminders").insert({ event_id: ev.id, user_id: userId });
-        remindersSent++;
+          if (sendError) {
+            sendErrors.push(`${email}: ${sendError.message}`);
+            continue;
+          }
+
+          await supabase.from("sent_event_reminders").insert({ event_id: ev.id, user_id: userId });
+          remindersSent++;
+        } catch (err) {
+          sendErrors.push(`user ${userId}: ${err instanceof Error ? err.message : "unknown error"}`);
+        }
       }
     }
 
-    return NextResponse.json({ checked: candidates?.length ?? 0, remindersSent });
+    return NextResponse.json({
+      checked: candidates?.length ?? 0,
+      remindersSent,
+      ...(sendErrors.length > 0 && { sendErrors }),
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Unknown error" },
