@@ -36,17 +36,29 @@ export async function GET(request: Request) {
 
     const resend = new Resend(process.env.RESEND_API_KEY);
     const supabase = serviceClient();
+
+    // Event date/time inputs have no timezone attached — they're plain values
+    // typed into <input type="date"> / <input type="time">. We assume they were
+    // entered in Philippine time (UTC+8). Change this if your users are elsewhere,
+    // or later add a per-user timezone column for a fully correct solution.
+    const EVENT_TZ_OFFSET = "+08:00";
+
     const now = new Date();
     const windowStart = new Date(now.getTime() + 23 * 60 * 60 * 1000);
     const windowEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);
 
-    // Coarse date-range filter first (cheap), exact time filtered below.
+    // Widen the cheap pre-filter by a day on each side so the timezone shift
+    // above can never accidentally exclude a real candidate — the precise
+    // eventMoment check below (with the offset applied) does the real filtering.
+    const coarseStart = new Date(windowStart.getTime() - 24 * 60 * 60 * 1000);
+    const coarseEnd = new Date(windowEnd.getTime() + 24 * 60 * 60 * 1000);
+
     const { data: candidates, error } = await supabase
       .from("events")
       .select("id, title, event_date, start_time, owner_id")
       .not("start_time", "is", null)
-      .gte("event_date", windowStart.toISOString().slice(0, 10))
-      .lte("event_date", windowEnd.toISOString().slice(0, 10));
+      .gte("event_date", coarseStart.toISOString().slice(0, 10))
+      .lte("event_date", coarseEnd.toISOString().slice(0, 10));
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -56,7 +68,7 @@ export async function GET(request: Request) {
     const sendErrors: string[] = [];
 
     for (const ev of candidates ?? []) {
-      const eventMoment = new Date(`${ev.event_date}T${ev.start_time}`);
+      const eventMoment = new Date(`${ev.event_date}T${ev.start_time}${EVENT_TZ_OFFSET}`);
       if (eventMoment < windowStart || eventMoment > windowEnd) continue;
 
       const { data: participants } = await supabase
