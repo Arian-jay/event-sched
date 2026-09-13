@@ -79,6 +79,12 @@ export async function GET(request: Request) {
       const recipientIds = Array.from(new Set([ev.owner_id, ...(participants ?? []).map((p) => p.user_id)]));
 
       for (const userId of recipientIds) {
+        const formattedDate = new Date(`${ev.event_date}T00:00:00`).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
+
         try {
           const { data: alreadySent } = await supabase
             .from("sent_event_reminders")
@@ -96,7 +102,7 @@ export async function GET(request: Request) {
             from: process.env.EMAIL_FROM ?? "Together <onboarding@resend.dev>",
             to: email,
             subject: `Reminder: "${ev.title}" is coming up`,
-            html: `<p>Just a heads-up — <strong>${ev.title}</strong> is scheduled for ${ev.event_date} at ${ev.start_time?.slice(
+            html: `<p>Just a heads-up — <strong>${ev.title}</strong> is scheduled for ${formattedDate} at ${ev.start_time?.slice(
               0,
               5
             )}, about 24 hours from now.</p>`,
